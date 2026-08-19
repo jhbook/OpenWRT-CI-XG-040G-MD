@@ -34,3 +34,7 @@ CONFIG_PACKAGE_usb-modeswitch=y
 CONFIG_PACKAGE_kmod-tun=y
 CONFIG_PACKAGE_luci-app-easytier=y
 CONFIG_PACKAGE_luci-i18n-easytier-zh-cn=y
+
+# DDNSTO‑X 远程穿透 web界面与汉化（Packages.sh添加pkg模式拉取nas‑packages）
+CONFIG_PACKAGE_luci-app-ddnsto=y
+CONFIG_PACKAGE_luci-i18n-ddnsto-zh-cn=y
