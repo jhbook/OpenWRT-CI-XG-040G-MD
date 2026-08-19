@@ -65,6 +65,7 @@ UPDATE_PACKAGE "openclash" "vernesong/OpenClash" "dev" "pkg"
 
 #UPDATE_PACKAGE "athena-led" "unraveloop/JDC-AX6600-Athena-LED-Controller" "main"
 UPDATE_PACKAGE "ddns-go" "sirpdboy/luci-app-ddns-go" "main"
+UPDATE_PACKAGE "ddnsto" "linkease/nas-packages" "master" "pkg"
 #UPDATE_PACKAGE "diskman" "sbwml/luci-app-diskman" "main"
 #UPDATE_PACKAGE "diskmanager" "4IceG/luci-app-mini-diskmanager" "main"
 UPDATE_PACKAGE "easytier" "EasyTier/luci-app-easytier" "main"
