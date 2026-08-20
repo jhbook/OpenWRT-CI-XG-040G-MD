@@ -63,6 +63,7 @@ jobs:
   core:
     name: ${{inputs.WRT_SOURCE}}
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - name: Checkout Projects
         uses: actions/checkout@main
@@ -71,20 +72,27 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo -E apt -yqq purge firefox
-          sudo -E apt -yqq update
-          sudo -E apt -yqq full-upgrade
-          sudo -E apt -yqq autoremove --purge
-          sudo -E apt -yqq autoclean
-          sudo -E apt -yqq clean
-          sudo -E apt -yqq install dos2unix libfuse-dev
-          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
-          sudo -E systemctl daemon-reload
-          sudo -E timedatectl set-timezone "Asia/Shanghai"
+        sudo -E systemctl mask apt-daily.service apt-daily-upgrade.service || true
+        sudo -E systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service || true
+        sudo -E rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock
 
-          sudo mkdir -p /mnt/build_wrt
-          sudo chown $USER:$USER /mnt/build_wrt
-          sudo ln -s /mnt/build_wrt $GITHUB_WORKSPACE/wrt
+        APT_OPTS="-yqq -o DPkg::Lock::Timeout=120"
+
+        sudo -E apt $APT_OPTS purge firefox || true
+        sudo -E apt $APT_OPTS update
+        sudo -E apt $APT_OPTS autoremove --purge || true
+        sudo -E apt $APT_OPTS autoclean
+        sudo -E apt $APT_OPTS clean
+        sudo -E apt $APT_OPTS install dos2unix libfuse-dev
+
+        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+
+        sudo -E systemctl daemon-reload
+        sudo -E timedatectl set-timezone "Asia/Shanghai"
+
+        sudo mkdir -p /mnt/build_wrt
+        sudo chown $USER:$USER /mnt/build_wrt
+        sudo ln -s /mnt/build_wrt $GITHUB_WORKSPACE/wrt
 
       - name: Initialization Values
         run: |
