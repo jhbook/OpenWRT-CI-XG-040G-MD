@@ -4,6 +4,10 @@
 #CI项目
 name: AIR-NWRT
 
+concurrency:
+  group: ${{ github.workflow }}‑${{ github.ref }}
+  cancel-in-progress: true
+
 #CI计划
 on:
   #自动编译：当Auto-Clean运行完成后
