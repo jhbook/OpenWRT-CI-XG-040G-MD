@@ -107,3 +107,12 @@ CONFIG_PACKAGE_airoha-pond=y
 
 #luci
 CONFIG_PACKAGE_luci-app-pon=y
+
+# RTL8811CU USB Wifi
+CONFIG_PACKAGE_kmod-rtw88=y
+CONFIG_PACKAGE_kmod-rtw88-8821cu=y
+CONFIG_PACKAGE_rtw88-firmware=y
+CONFIG_PACKAGE_usb-modeswitch=y
+CONFIG_PACKAGE_usb-modeswitch-data=y
+CONFIG_PACKAGE_iw-full=y
+CONFIG_PACKAGE_hostapd=y
