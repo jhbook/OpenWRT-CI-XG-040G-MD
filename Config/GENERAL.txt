@@ -1,7 +1,7 @@
 #科学插件调整
 CONFIG_PACKAGE_luci-app-openclash=y
 #lucky
-CONFIG_PACKAGE_luci-app-lucky=y
+CONFIG_PACKAGE_luci-app-lucky=n
 #增加插件
 CONFIG_PACKAGE_luci-app-autoreboot=y
 CONFIG_PACKAGE_luci-app-gecoosac=y
