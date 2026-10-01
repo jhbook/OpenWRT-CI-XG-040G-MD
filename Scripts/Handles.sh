@@ -72,3 +72,12 @@ if [ -f "$RUST_FILE" ]; then
 
 	cd $PKG_PATH && echo "rust has been fixed!"
 fi
+
+# 替换为浙大镜像源 注释 pon_drivers / pon_userspace 两个404源
+ROOTFS_FILE="$GITHUB_WORKSPACE/wrt/files/etc/apk/repositories.d/distfeeds.list"
+if [ -f "$ROOTFS_FILE" ];then
+sed -i 's#https://downloads.immortalwrt.org#https://mirror.zju.edu.cn/immortalwrt#g' "$ROOTFS_FILE"
+sed -i '/pon_drivers\|pon_userspace/s/^/#/' "$ROOTFS_FILE"
+echo "apk source patch done!"
+fi
+
