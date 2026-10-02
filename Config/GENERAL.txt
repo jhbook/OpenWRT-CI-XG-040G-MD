@@ -1,3 +1,9 @@
+# APK 软件源
+CONFIG_VERSIONOPT=y
+CONFIG_VERSION_REPO="https://mirrors.zju.edu.cn/immortalwrt/snapshots"
+# 注释两个 404 的 PON 软件源
+CONFIG_FEED_pon_drivers=m
+CONFIG_FEED_pon_userspace=m
 #科学插件调整
 CONFIG_PACKAGE_luci-app-openclash=y
 #lucky
