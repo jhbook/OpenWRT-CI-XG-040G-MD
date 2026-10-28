@@ -34,3 +34,11 @@ workflows——自定义CI配置
 Scripts——自定义脚本
 
 Config——自定义配置
+
+Docs——编译教程
+
+## 编译教程
+
+- 本地编译（Ubuntu）与 GitHub 工作流编译完整说明：[Docs/BUILD-GUIDE.md](Docs/BUILD-GUIDE.md)
+- 本地编译快速开始：先 `bash Scripts/local-build.sh --test` 验证配置，再 `bash Scripts/local-build.sh` 完整编译
+
