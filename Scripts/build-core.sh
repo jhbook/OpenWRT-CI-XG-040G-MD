@@ -56,6 +56,13 @@ export GITHUB_WORKSPACE GITHUB_ENV
 export WRT_WORKSPACE WRT_DIR WRT_TARGET WRT_CONFIG WRT_THEME WRT_NAME WRT_SSID
 export WRT_WORD WRT_IP WRT_PW WRT_PACKAGE WRT_TEST WRT_MARK WRT_DATE WRT_JOBS
 
+# Scripts/Handles.sh 等脚本使用固定的 $GITHUB_WORKSPACE/wrt 路径，
+# 本地编译指定了其它源码目录时用符号链接补齐（脚本退出时自动清理）
+WRT_LINK="$WRT_WORKSPACE/wrt"
+if [ "$WRT_DIR" != "$WRT_LINK" ] && [ ! -e "$WRT_LINK" ] && [ ! -L "$WRT_LINK" ]; then
+	ln -s "$WRT_DIR" "$WRT_LINK" 2>/dev/null && trap 'rm -f "$WRT_LINK"' EXIT
+fi
+
 need_source() {
 	[ -d "$WRT_DIR" ] || { echo "错误: 源码目录不存在: $WRT_DIR"; exit 1; }
 }

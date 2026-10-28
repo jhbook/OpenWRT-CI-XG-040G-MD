@@ -32,12 +32,13 @@ WRT_SKIP_CLEAN="false"
 SRC_DIR=""
 MENUCONFIG="false"
 INSTALL_DEPS="false"
+SKIP_DEPS="false"
 FORCE_CLONE="false"
 PROXY_URL=""
 
 DEPS=(build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git \
 	libncurses-dev libssl-dev python3-setuptools python3-dev rsync swig unzip zlib1g-dev \
-	file wget libelf-dev)
+	file wget libelf-dev jq)
 
 usage() {
 	cat <<'EOF'
@@ -53,8 +54,10 @@ usage() {
   -t, --test           只生成配置，不下载不编译
   -m, --menuconfig     生成配置后进入 make menuconfig
       --install-deps   自动安装缺失的编译依赖（需要 sudo）
+      --skip-deps      跳过编译依赖检查（--test 只生成配置时可跳过）
       --force-clone    删除已有源码目录并重新 clone
-      --proxy URL      git 代理前缀，例如 https://ghfast.top/
+      --proxy URL      GitHub 加速前缀，例如 https://ghfast.top/
+                       （本次运行内所有 github 克隆都走加速，不修改 git 全局配置）
   -h, --help           显示帮助
 
 环境变量 WRT_THEME / WRT_NAME / WRT_SSID / WRT_WORD / WRT_IP / WRT_PW 可覆盖默认固件参数。
@@ -72,6 +75,7 @@ while [ $# -gt 0 ]; do
 		-t|--test)     WRT_TEST="true"; shift ;;
 		-m|--menuconfig) MENUCONFIG="true"; shift ;;
 		--install-deps) INSTALL_DEPS="true"; shift ;;
+		--skip-deps)   SKIP_DEPS="true"; shift ;;
 		--force-clone) FORCE_CLONE="true"; shift ;;
 		--proxy)       PROXY_URL="${2:?缺少代理地址}"; shift 2 ;;
 		-h|--help)     usage; exit 0 ;;
@@ -95,6 +99,11 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 check_deps() {
+	if [ "$SKIP_DEPS" = "true" ]; then
+		echo "==> 已跳过编译依赖检查（--skip-deps）"
+		return
+	fi
+
 	local MISSING=()
 	for PKG in "${DEPS[@]}"; do
 		if ! dpkg -s "$PKG" >/dev/null 2>&1; then
@@ -147,11 +156,19 @@ prepare_source() {
 	fi
 
 	mkdir -p "$(dirname "$SRC_DIR")"
-	echo "==> 克隆源码: ${PROXY_URL}https://github.com/$WRT_REPO.git ($WRT_BRANCH)"
+	echo "==> 克隆源码: https://github.com/$WRT_REPO.git ($WRT_BRANCH)"
 	git clone --depth=1 --single-branch --branch "$WRT_BRANCH" \
-		"${PROXY_URL}https://github.com/$WRT_REPO.git" "$SRC_DIR"
+		"https://github.com/$WRT_REPO.git" "$SRC_DIR"
 	# 说明: 本地编译保留源码内置的国内下载源（只有 GitHub 云端才会移除），下载更快
 }
+
+# GitHub 加速前缀：只对本次运行的 git 生效，不写入用户 git 全局配置
+if [ -n "$PROXY_URL" ]; then
+	export GIT_CONFIG_COUNT=1
+	export GIT_CONFIG_KEY_0="url.${PROXY_URL}https://github.com/.insteadOf"
+	export GIT_CONFIG_VALUE_0="https://github.com/"
+	echo "==> GitHub 加速前缀: $PROXY_URL"
+fi
 
 echo "==> 配置: $WRT_CONFIG | 源码: $WRT_REPO ($WRT_BRANCH) | 目录: $SRC_DIR"
 echo "==> 模式: $([ "$WRT_TEST" = "true" ] && echo 仅生成配置 || echo 完整编译) | 并行: $WRT_JOBS"

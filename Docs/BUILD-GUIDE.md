@@ -95,7 +95,7 @@
 sudo apt update
 sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
   gettext git libncurses-dev libssl-dev python3-setuptools python3-dev rsync swig \
-  unzip zlib1g-dev file wget libelf-dev
+  unzip zlib1g-dev file wget libelf-dev jq
 ```
 
 ### 2. 快速开始
@@ -115,6 +115,12 @@ bash Scripts/local-build.sh -c AIROHA-TCBOOT
 bash Scripts/local-build.sh -c X86 -j 4
 ```
 
+> **国内网络**：直连 GitHub 常出现 `gnutls_handshake() failed` 或克隆超时，加加速前缀即可（实测可用：`https://ghfast.top/`、`https://gh-proxy.com/`、`https://gh.llkk.cc/`）：
+>
+> ```bash
+> bash Scripts/local-build.sh --test --proxy https://ghfast.top/
+> ```
+
 远程 Ubuntu（例如通过 SSH 登录服务器）时，把仓库同步上去再执行同样命令即可，脚本本身不依赖任何 GUI。
 
 ### 3. 参数说明
@@ -130,8 +136,9 @@ bash Scripts/local-build.sh -c X86 -j 4
 | `-t, --test` | 只生成配置，不下载不编译 |
 | `-m, --menuconfig` | 生成配置后进入 `make menuconfig` 手动微调 |
 | `--install-deps` | 自动安装缺失依赖（需要 sudo） |
+| `--skip-deps` | 跳过依赖检查，`--test` 只生成配置时可跳过 |
 | `--force-clone` | 删除已有源码目录重新拉取 |
-| `--proxy URL` | git 代理前缀，例如 `--proxy https://ghfast.top/` |
+| `--proxy URL` | GitHub 加速前缀（国内网络必备），例如 `--proxy https://ghfast.top/`；本次运行内所有 github 克隆都走加速，不改动 git 全局配置 |
 
 固件参数（主题、主机名、WiFi、IP）可用环境变量覆盖：
 
