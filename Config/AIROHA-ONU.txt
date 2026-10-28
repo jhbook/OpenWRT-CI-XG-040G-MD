@@ -59,12 +59,9 @@ CONFIG_PACKAGE_ucode-mod-nl80211=m
 CONFIG_PACKAGE_ucode-mod-rtnl=m
 CONFIG_PACKAGE_libopenssl-conf=m
 CONFIG_PACKAGE_libopenssl-legacy=m
-CONFIG_PACKAGE_libi2c=m
-CONFIG_PACKAGE_iw=m
 CONFIG_PACKAGE_fit-check-sign=m
 # NPU 状态
 CONFIG_PACKAGE_luci-app-airoha-npu=y
-CONFIG_PACKAGE_vlmcsd=n
 #
 # PON
 #
@@ -83,5 +80,4 @@ CONFIG_PACKAGE_airoha-pond=y
 CONFIG_PACKAGE_luci-app-pon=y
 
 # USB Wifi / USB 网络共享（RTL8811CU、随身WiFi、手机 USB 共享等）
-# 统一由 Config/GENERAL.txt 提供，此处不再重复
-CONFIG_PACKAGE_hostapd=y
+# 统一由 Config/GENERAL.txt 提供（含 wpad-openssl，已包含 hostapd 全部功能），此处不再重复

@@ -11,7 +11,7 @@
 #   WRT_CONFIG     配置文件名，不带 .txt（默认 AIROHA-ONU）
 #   WRT_THEME WRT_NAME WRT_SSID WRT_WORD WRT_IP WRT_PW WRT_PACKAGE
 #   WRT_TEST       true 时只生成配置，不下载不编译
-#   WRT_JOBS       并行任务数（默认 nproc）
+#   WRT_JOBS       并行任务数（默认按 CPU 与内存自动计算）
 #   WRT_SKIP_CLEAN true 时跳过 config 阶段的 make clean
 
 set -euo pipefail
@@ -23,13 +23,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${WRT_WORKSPACE:=$(cd "$SCRIPT_DIR/.." && pwd)}"
 : "${WRT_DIR:=$WRT_WORKSPACE/wrt}"
 : "${GITHUB_WORKSPACE:=$WRT_WORKSPACE}"
-: "${WRT_JOBS:=$(nproc 2>/dev/null || echo 4)}"
+
+# 并行度：按 CPU 与内存共同决定（部分包编译占用内存较多，纯按 nproc 容易 OOM）
+auto_jobs() {
+	local cpus mem_gb by_mem
+	cpus=$(nproc 2>/dev/null || echo 4)
+	mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null || echo 4)
+	[ "$mem_gb" -lt 1 ] && mem_gb=1
+
+	by_mem=$(( mem_gb * 2 / 3 ))
+	[ "$by_mem" -lt 1 ] && by_mem=1
+
+	if [ "$cpus" -lt "$by_mem" ]; then echo "$cpus"; else echo "$by_mem"; fi
+}
+: "${WRT_JOBS:=$(auto_jobs)}"
 
 # ---- 编译参数默认值（本地编译不传参也能跑）----
 : "${WRT_CONFIG:=AIROHA-ONU}"
 : "${WRT_THEME:=argon}"
-: "${WRT_NAME:=ImmortalWrt}"
-: "${WRT_SSID:=ImmortalWrt}"
+: "${WRT_NAME:=OWRT}"
+: "${WRT_SSID:=OWRT}"
 : "${WRT_WORD:=12345678}"
 : "${WRT_IP:=192.168.100.1}"
 : "${WRT_PW:=无}"
@@ -47,21 +60,37 @@ if [ -z "${WRT_TARGET:-}" ]; then
 	WRT_TARGET="${WRT_TARGET:-none}"
 fi
 
-# Scripts/*.sh 依赖 GITHUB_* 变量，本地编译时补齐
+# Scripts/*.sh 依赖 GITHUB_* 变量，本地编译时补齐（临时文件在脚本退出时清理）
+GITHUB_ENV_TMP=""
 if [ -z "${GITHUB_ENV:-}" ] || ! ( : >> "$GITHUB_ENV" ) 2>/dev/null; then
-	GITHUB_ENV="$(mktemp -t wrt-build-env.XXXXXX)"
+	GITHUB_ENV_TMP="$(mktemp -t wrt-build-env.XXXXXX)"
+	GITHUB_ENV="$GITHUB_ENV_TMP"
 fi
-
-export GITHUB_WORKSPACE GITHUB_ENV
-export WRT_WORKSPACE WRT_DIR WRT_TARGET WRT_CONFIG WRT_THEME WRT_NAME WRT_SSID
-export WRT_WORD WRT_IP WRT_PW WRT_PACKAGE WRT_TEST WRT_MARK WRT_DATE WRT_JOBS
 
 # Scripts/Handles.sh 等脚本使用固定的 $GITHUB_WORKSPACE/wrt 路径，
 # 本地编译指定了其它源码目录时用符号链接补齐（脚本退出时自动清理）
 WRT_LINK="$WRT_WORKSPACE/wrt"
+LINK_CREATED="false"
 if [ "$WRT_DIR" != "$WRT_LINK" ] && [ ! -e "$WRT_LINK" ] && [ ! -L "$WRT_LINK" ]; then
-	ln -s "$WRT_DIR" "$WRT_LINK" 2>/dev/null && trap 'rm -f "$WRT_LINK"' EXIT
+	if ln -s "$WRT_DIR" "$WRT_LINK" 2>/dev/null; then
+		LINK_CREATED="true"
+	fi
 fi
+
+cleanup() {
+	if [ "$LINK_CREATED" = "true" ] && [ -L "$WRT_LINK" ]; then
+		rm -f "$WRT_LINK"
+	fi
+	if [ -n "$GITHUB_ENV_TMP" ]; then
+		rm -f "$GITHUB_ENV_TMP"
+	fi
+	return 0
+}
+trap cleanup EXIT
+
+export GITHUB_WORKSPACE GITHUB_ENV
+export WRT_WORKSPACE WRT_DIR WRT_TARGET WRT_CONFIG WRT_THEME WRT_NAME WRT_SSID
+export WRT_WORD WRT_IP WRT_PW WRT_PACKAGE WRT_TEST WRT_MARK WRT_DATE WRT_JOBS
 
 need_source() {
 	[ -d "$WRT_DIR" ] || { echo "错误: 源码目录不存在: $WRT_DIR"; exit 1; }
@@ -100,7 +129,10 @@ do_config() {
 	cd "$WRT_DIR"
 	echo "==> 生成 .config（$WRT_CONFIG）"
 
-	if [[ "${WRT_CONFIG,,}" == *test* ]]; then
+	# 清空旧配置：复用源码目录重跑时避免与上一次的配置叠加
+	rm -f .config .config.old
+
+	if [ "${WRT_CONFIG^^}" = "TEST" ]; then
 		cat "$CONFIG_FILE" >> .config
 	else
 		cat "$CONFIG_FILE" "$WRT_WORKSPACE/Config/GENERAL.txt" >> .config
@@ -108,14 +140,23 @@ do_config() {
 
 	bash "$WRT_WORKSPACE/Scripts/Settings.sh"
 
-	make defconfig -j"$WRT_JOBS"
-	if [ "$WRT_SKIP_CLEAN" != "true" ]; then
-		make clean -j"$WRT_JOBS"
+	make defconfig
+
+	if [ "$WRT_SKIP_CLEAN" = "true" ]; then
+		echo "==> 已跳过 make clean（WRT_SKIP_CLEAN=true）"
+	else
+		echo "==> 执行 make clean（想复用上次编译产物可设 WRT_SKIP_CLEAN=true）"
+		make clean
 	fi
 }
 
 do_download() {
 	need_source
+	if [ "$WRT_TEST" = "true" ]; then
+		echo "==> WRT_TEST=true，跳过下载"
+		return 0
+	fi
+
 	cd "$WRT_DIR"
 	echo "==> 下载软件包源码"
 	make download -j"$WRT_JOBS" || make download -j1 V=s
@@ -123,6 +164,11 @@ do_download() {
 
 do_compile() {
 	need_source
+	if [ "$WRT_TEST" = "true" ]; then
+		echo "==> WRT_TEST=true，跳过编译"
+		return 0
+	fi
+
 	cd "$WRT_DIR"
 	echo "==> 开始编译（并行 $WRT_JOBS）"
 	make -j"$WRT_JOBS" || make -j1 V=s
@@ -138,10 +184,8 @@ case "$STEP" in
 		do_feeds
 		do_packages
 		do_config
-		if [ "$WRT_TEST" != "true" ]; then
-			do_download
-			do_compile
-		fi
+		do_download
+		do_compile
 		;;
 	*)
 		echo "用法: bash Scripts/build-core.sh <feeds|packages|config|download|compile|all>"

@@ -19,15 +19,15 @@ WRT_WORKSPACE="$(cd "$SCRIPT_DIR/.." && pwd)"
 : "${WRT_REPO:=pbs05/ponwrt}"
 : "${WRT_BRANCH:=master}"
 : "${WRT_THEME:=argon}"
-: "${WRT_NAME:=ImmortalWrt}"
-: "${WRT_SSID:=ImmortalWrt}"
+: "${WRT_NAME:=OWRT}"
+: "${WRT_SSID:=OWRT}"
 : "${WRT_WORD:=12345678}"
 : "${WRT_IP:=192.168.100.1}"
 : "${WRT_PW:=无}"
-WRT_PACKAGE="${WRT_PACKAGE:-}"
-WRT_TEST="false"
-WRT_JOBS="$(nproc 2>/dev/null || echo 4)"
-WRT_SKIP_CLEAN="false"
+: "${WRT_PACKAGE:=}"
+: "${WRT_TEST:=false}"
+: "${WRT_SKIP_CLEAN:=false}"
+: "${WRT_JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 SRC_DIR=""
 MENUCONFIG="false"
@@ -38,7 +38,7 @@ PROXY_URL=""
 
 DEPS=(build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git \
 	libncurses-dev libssl-dev python3-setuptools python3-dev rsync swig unzip zlib1g-dev \
-	file wget libelf-dev jq)
+	file wget curl libelf-dev jq)
 
 usage() {
 	cat <<'EOF'
@@ -47,9 +47,9 @@ usage() {
 选项:
   -c, --config NAME    配置名，对应 Config/NAME.txt（默认 AIROHA-ONU）
   -d, --dir DIR        源码目录（默认 ~/openwrt-build/小写配置名）
-  -r, --repo REPO      源码仓库（默认 pbs05/ponwrt）
+  -r, --repo REPO      源码仓库（默认 pbs05/ponwrt），可写 owner/repo 或完整 URL
   -b, --branch NAME    源码分支（默认 master）
-  -j, --jobs N         并行任务数（默认 nproc）
+  -j, --jobs N         并行任务数（默认按 CPU 与内存自动计算）
   -p, --package TEXT   追加到 .config 的插件配置
   -t, --test           只生成配置，不下载不编译
   -m, --menuconfig     生成配置后进入 make menuconfig
@@ -84,9 +84,12 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$SRC_DIR" ] || SRC_DIR="$HOME/openwrt-build/$(echo "$WRT_CONFIG" | tr '[:upper:]' '[:lower:]')"
-if [ "$WRT_CONFIG" != *test* ] && [ "$WRT_TEST" != "true" ]; then
-	:
-fi
+
+# 允许传 owner/repo 或完整 URL
+case "$WRT_REPO" in
+	http*|git@*) WRT_REPO_URL="$WRT_REPO" ;;
+	*)           WRT_REPO_URL="https://github.com/$WRT_REPO.git" ;;
+esac
 
 CONFIG_FILE="$WRT_WORKSPACE/Config/$WRT_CONFIG.txt"
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -101,7 +104,7 @@ fi
 check_deps() {
 	if [ "$SKIP_DEPS" = "true" ]; then
 		echo "==> 已跳过编译依赖检查（--skip-deps）"
-		return
+		return 0
 	fi
 
 	local MISSING=()
@@ -113,13 +116,14 @@ check_deps() {
 
 	if [ "${#MISSING[@]}" -eq 0 ]; then
 		echo "==> 编译依赖检查通过"
-		return
+		return 0
 	fi
 
 	echo "==> 缺少编译依赖: ${MISSING[*]}"
 	if [ "$INSTALL_DEPS" = "true" ]; then
-		sudo apt update
-		sudo apt install -y "${MISSING[@]}"
+		export DEBIAN_FRONTEND=noninteractive
+		sudo -E apt update
+		sudo -E apt install -y "${MISSING[@]}"
 	else
 		echo "   可执行 sudo apt install -y ${MISSING[*]}"
 		echo "   或加 --install-deps 自动安装"
@@ -146,19 +150,27 @@ check_disk() {
 
 prepare_source() {
 	if [ "$FORCE_CLONE" = "true" ] && [ -d "$SRC_DIR" ]; then
+		# 拒绝删除危险路径，避免参数异常时误删家目录或根目录
+		case "$SRC_DIR" in
+			""|"/"|"$HOME"|"$HOME/")
+				echo "错误: 拒绝删除危险路径: $SRC_DIR"
+				exit 1
+				;;
+		esac
+
 		echo "==> 删除旧源码目录: $SRC_DIR"
 		rm -rf "$SRC_DIR"
 	fi
 
 	if [ -d "$SRC_DIR/.git" ]; then
 		echo "==> 复用已有源码目录: $SRC_DIR"
-		return
+		return 0
 	fi
 
 	mkdir -p "$(dirname "$SRC_DIR")"
-	echo "==> 克隆源码: https://github.com/$WRT_REPO.git ($WRT_BRANCH)"
+	echo "==> 克隆源码: $WRT_REPO_URL ($WRT_BRANCH)"
 	git clone --depth=1 --single-branch --branch "$WRT_BRANCH" \
-		"https://github.com/$WRT_REPO.git" "$SRC_DIR"
+		"$WRT_REPO_URL" "$SRC_DIR"
 	# 说明: 本地编译保留源码内置的国内下载源（只有 GitHub 云端才会移除），下载更快
 }
 
@@ -201,7 +213,10 @@ echo "=================================================="
 if [ "$WRT_TEST" = "true" ]; then
 	echo "配置已生成: $SRC_DIR/.config"
 	echo "目标平台: $(grep -m 1 -oP '^CONFIG_TARGET_BOARD="\K[^"]+' "$SRC_DIR/.config" 2>/dev/null || echo 未知)"
-	echo "启用插件数: $(grep -c '^CONFIG_PACKAGE_luci-app.*=y' "$SRC_DIR/.config" 2>/dev/null || echo 0)"
+
+	PLUGIN_COUNT="$(grep -c '^CONFIG_PACKAGE_luci-app.*=y' "$SRC_DIR/.config" 2>/dev/null || true)"
+	echo "启用插件数: ${PLUGIN_COUNT:-0}"
+
 	echo "确认无误后执行完整编译:"
 	echo "  bash Scripts/local-build.sh -c $WRT_CONFIG -d $SRC_DIR"
 else

@@ -3,3 +3,7 @@
 /cache/
 /logs/
 *.log
+
+# 私有定制（可选，不希望公开时保留在本地）
+/Config/PRIVATE.txt
+/Scripts/PRIVATE.sh

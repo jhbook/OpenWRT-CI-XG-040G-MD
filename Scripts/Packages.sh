@@ -1,44 +1,62 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
+#
+# 说明：本脚本由 WRT-CORE.yml 的「Custom Packages」步骤执行，工作目录为源码根目录（./wrt）。
+#       职责：①用第三方仓库覆盖本地同名插件；②按 GitHub Release 更新 sing-box 版本号与哈希。
+set -uo pipefail
+
+GITHUB_API="https://api.github.com"
 
 #安装和更新软件包
 UPDATE_PACKAGE() {
 	local PKG_NAME=$1
 	local PKG_REPO=$2
 	local PKG_BRANCH=$3
-	local PKG_SPECIAL=$4
-	local PKG_LIST=("$PKG_NAME" $5)  # 第5个参数为自定义名称列表
+	local PKG_SPECIAL=${4:-}
+	local PKG_LIST=("$PKG_NAME" ${5:-})  # 第5个参数为自定义名称列表
 	local REPO_NAME=${PKG_REPO#*/}
 
 	echo " "
 
 	# 删除本地可能存在的不同名称的软件包
 	for NAME in "${PKG_LIST[@]}"; do
-		# 查找匹配的目录
-		echo "Search directory: $NAME"
-		local FOUND_DIRS=$(find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d -iname "*$NAME*" 2>/dev/null)
+		[ -n "$NAME" ] || continue
 
-		# 删除找到的目录
+		local FOUND_DIRS
+		FOUND_DIRS=$(find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d -iname "*$NAME*" 2>/dev/null)
+
 		if [ -n "$FOUND_DIRS" ]; then
 			while read -r DIR; do
-				rm -rf "$DIR"
-				echo "Delete directory: $DIR"
+				[ -n "$DIR" ] || continue
+				#只允许删除 feeds 下的目录，避免变量异常时误删其它路径
+				case "$DIR" in
+					../feeds/luci/*|../feeds/packages/*)
+						rm -rf "$DIR"
+						echo "Delete directory: $DIR"
+						;;
+					*)
+						echo "::warning::跳过非 feeds 路径：$DIR"
+						;;
+				esac
 			done <<< "$FOUND_DIRS"
 		else
-			echo "Not fonud directory: $NAME"
+			echo "Not found directory: $NAME"
 		fi
 	done
 
-	# 克隆 GitHub 仓库
-	git clone --depth=1 --single-branch --branch $PKG_BRANCH "https://github.com/$PKG_REPO.git"
+	# 克隆 GitHub 仓库：失败直接返回非 0，避免"删掉了却没补回来"却仍然绿灯
+	if ! git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git"; then
+		echo "::error::克隆 $PKG_REPO ($PKG_BRANCH) 失败"
+		return 1
+	fi
 
 	# 处理克隆的仓库
 	if [[ "$PKG_SPECIAL" == "pkg" ]]; then
-		find ./$REPO_NAME/*/ -maxdepth 3 -type d -iname "*$PKG_NAME*" -prune -exec cp -rf {} ./ \;
-		rm -rf ./$REPO_NAME/
+		find ./"$REPO_NAME"/*/ -maxdepth 3 -type d -name "$PKG_NAME" -prune -exec cp -rf {} ./ \;
+		rm -rf ./"$REPO_NAME"/
 	elif [[ "$PKG_SPECIAL" == "name" ]]; then
-		mv -f $REPO_NAME $PKG_NAME
+		mv -f "$REPO_NAME" "$PKG_NAME"
 	fi
 }
 
@@ -89,29 +107,64 @@ rm -rf ./luci-app-airoha-npu/luci-app-airoha-npu/
 UPDATE_VERSION() {
 	local PKG_NAME=$1
 	local PKG_MARK=${2:-false}
-	local PKG_FILES=$(find ./ ../feeds/packages/ -maxdepth 3 -type f -wholename "*/$PKG_NAME/Makefile")
+	local PKG_FILES
+	PKG_FILES=$(find ./ ../feeds/packages/ -maxdepth 5 -type f -path "*/$PKG_NAME/Makefile" 2>/dev/null)
 
 	if [ -z "$PKG_FILES" ]; then
 		echo "$PKG_NAME not found!"
-		return
+		return 0
 	fi
 
 	echo -e "\n$PKG_NAME version update has started!"
 
-	for PKG_FILE in $PKG_FILES; do
-		local PKG_REPO=$(grep -Po "PKG_SOURCE_URL:=https://.*github.com/\K[^/]+/[^/]+(?=.*)" $PKG_FILE)
-		local PKG_TAG=$(curl -sL "https://api.github.com/repos/$PKG_REPO/releases" | jq -r "map(select(.prerelease == $PKG_MARK)) | first | .tag_name")
+	# 存在 GITHUB_TOKEN 时带上，避免 API 限流
+	local CURL_AUTH=()
+	[ -n "${GITHUB_TOKEN:-}" ] && CURL_AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
 
-		local OLD_VER=$(grep -Po "PKG_VERSION:=\K.*" "$PKG_FILE")
-		local OLD_URL=$(grep -Po "PKG_SOURCE_URL:=\K.*" "$PKG_FILE")
-		local OLD_FILE=$(grep -Po "PKG_SOURCE:=\K.*" "$PKG_FILE")
-		local OLD_HASH=$(grep -Po "PKG_HASH:=\K.*" "$PKG_FILE")
+	for PKG_FILE in $PKG_FILES; do
+		local PKG_REPO
+		PKG_REPO=$(grep -Po "PKG_SOURCE_URL:=https://.*github.com/\K[^/]+/[^/]+(?=.*)" "$PKG_FILE")
+
+		if [ -z "$PKG_REPO" ]; then
+			echo "$PKG_FILE: 未解析到 GitHub 仓库地址，跳过"
+			continue
+		fi
+
+		local PKG_TAG
+		PKG_TAG=$(curl -fsSL -H "Accept: application/vnd.github+json" "${CURL_AUTH[@]}" \
+			"$GITHUB_API/repos/$PKG_REPO/releases" 2>/dev/null \
+			| jq -r "map(select(.prerelease == $PKG_MARK)) | first | .tag_name // empty" 2>/dev/null)
+
+		if [ -z "$PKG_TAG" ] || [ "$PKG_TAG" = "null" ]; then
+			echo "$PKG_FILE: 未获取到 Release 版本（$PKG_REPO），跳过"
+			continue
+		fi
+
+		local OLD_VER OLD_URL OLD_FILE OLD_HASH
+		OLD_VER=$(grep -Po "PKG_VERSION:=\K.*" "$PKG_FILE")
+		OLD_URL=$(grep -Po "PKG_SOURCE_URL:=\K.*" "$PKG_FILE")
+		OLD_FILE=$(grep -Po "PKG_SOURCE:=\K.*" "$PKG_FILE")
+		OLD_HASH=$(grep -Po "PKG_HASH:=\K.*" "$PKG_FILE")
 
 		local PKG_URL=$([[ "$OLD_URL" == *"releases"* ]] && echo "${OLD_URL%/}/$OLD_FILE" || echo "${OLD_URL%/}")
 
-		local NEW_VER=$(echo $PKG_TAG | sed -E 's/[^0-9]+/\./g; s/^\.|\.$//g')
-		local NEW_URL=$(echo $PKG_URL | sed "s/\$(PKG_VERSION)/$NEW_VER/g; s/\$(PKG_NAME)/$PKG_NAME/g")
-		local NEW_HASH=$(curl -sL "$NEW_URL" | sha256sum | cut -d ' ' -f 1)
+		local NEW_VER NEW_URL
+		NEW_VER=$(echo "$PKG_TAG" | sed -E 's/[^0-9]+/\./g; s/^\.|\.$//g')
+		NEW_URL=$(echo "$PKG_URL" | sed "s/\$(PKG_VERSION)/$NEW_VER/g; s/\$(PKG_NAME)/$PKG_NAME/g")
+
+		# 下载地址仍残留未解析变量时不做更新，否则会出现"新版本号配旧哈希"的错配
+		if [[ "$NEW_URL" == *'$('* ]]; then
+			echo "$PKG_FILE: 下载地址含未解析变量（$NEW_URL），跳过版本更新"
+			continue
+		fi
+
+		local NEW_HASH
+		NEW_HASH=$(curl -fsSL "$NEW_URL" 2>/dev/null | sha256sum | cut -d ' ' -f 1)
+
+		if [ -z "$NEW_HASH" ]; then
+			echo "$PKG_FILE: 下载失败，跳过版本更新（$NEW_URL）"
+			continue
+		fi
 
 		echo "old version: $OLD_VER $OLD_HASH"
 		echo "new version: $NEW_VER $NEW_HASH"
@@ -133,3 +186,5 @@ UPDATE_VERSION "sing-box"
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then
 	source "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh"
 fi
+
+exit 0

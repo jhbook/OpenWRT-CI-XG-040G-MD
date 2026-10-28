@@ -13,18 +13,21 @@ on:
   #手动清理
   workflow_dispatch:
 
-permissions: write-all
+permissions:
+  contents: write   # 删除旧 Release / Tag
+  actions: write    # 删除旧 Workflow 运行记录
 
 jobs:
   auto_clean:
     runs-on: ubuntu-latest
     steps:
       - name: Delete old Releases and Workflows
-        uses: ophub/delete-releases-workflows@main
+        uses: ophub/delete-releases-workflows@v0.1.0
         with:
           gh_token: ${{secrets.GITHUB_TOKEN}}
           delete_releases: true
-          releases_keep_latest: 1
+          #保留 2 条：AIROHA-ONU 与 AIROHA-TCBOOT 各一条，避免互相删除
+          releases_keep_latest: 2
           delete_tags: true
           delete_workflows: true
           workflows_keep_day: 1

@@ -25,7 +25,14 @@ on:
         type: boolean
 
 #CI权限
-permissions: write-all
+permissions:
+  contents: write   # 发布 Release（WRT-CORE 内 action-gh-release）
+  actions: write    # 缓存管理（gh cache list / delete）
+
+#同一时间只跑一条编译链，避免与 AIR-TCBOOT 抢占 Release 与缓存
+concurrency:
+  group: air-onu
+  cancel-in-progress: false
 
 #CI任务
 jobs:

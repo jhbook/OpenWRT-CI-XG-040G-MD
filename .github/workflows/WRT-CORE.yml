@@ -44,6 +44,10 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: write   # 发布 Release（action-gh-release）
+  actions: write    # gh cache list / gh cache delete
+
 env:
   GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
   WRT_CONFIG: ${{inputs.WRT_CONFIG}}
@@ -63,9 +67,14 @@ jobs:
   core:
     name: ${{inputs.WRT_SOURCE}}
     runs-on: ubuntu-latest
+    #全量编译耗时长，显式放宽上限并避免同配置并发
+    timeout-minutes: 360
+    concurrency:
+      group: wrt-core-${{inputs.WRT_CONFIG}}
+      cancel-in-progress: false
     steps:
       - name: Checkout Projects
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Initialization Environment
         env:
@@ -73,10 +82,6 @@ jobs:
         run: |
           sudo -E apt -yqq purge firefox
           sudo -E apt -yqq update
-          sudo -E apt -yqq full-upgrade
-          sudo -E apt -yqq autoremove --purge
-          sudo -E apt -yqq autoclean
-          sudo -E apt -yqq clean
           sudo -E apt -yqq install dos2unix libfuse-dev
           sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
           sudo -E systemctl daemon-reload
@@ -91,7 +96,12 @@ jobs:
           echo "WRT_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
           echo "WRT_MARK=${GITHUB_REPOSITORY%%/*}" >> $GITHUB_ENV
           echo "WRT_INFO=${WRT_SOURCE%%/*}" >> $GITHUB_ENV
-          echo "WRT_TARGET=$(grep -m 1 -oP '^CONFIG_TARGET_\K[\w]+(?=\=y)' ./Config/$WRT_CONFIG.txt)" >> $GITHUB_ENV
+          WRT_TARGET_VALUE=$(grep -m 1 -oP '^CONFIG_TARGET_\K[\w]+(?=\=y)' ./Config/$WRT_CONFIG.txt)
+          if [ -z "$WRT_TARGET_VALUE" ]; then
+            echo "::error::未在 Config/$WRT_CONFIG.txt 中解析到 CONFIG_TARGET_*，请检查设备配置"
+            exit 1
+          fi
+          echo "WRT_TARGET=$WRT_TARGET_VALUE" >> $GITHUB_ENV
           echo "WRT_WIFI=wifi-no" >> $GITHUB_ENV
           echo "WRT_KVER=none" >> $GITHUB_ENV
           echo "WRT_LIST=none" >> $GITHUB_ENV
@@ -102,23 +112,39 @@ jobs:
 
           cd ./wrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
 
+          # 限制 ccache 体积，避免缓存超出配额后保存失败
+          if command -v ccache >/dev/null 2>&1; then
+            ccache -M 5G >/dev/null 2>&1 || true
+          fi
+
           # GitHub Action 移除国内下载源
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
+            cp -f "$PROJECT_MIRRORS_FILE" "$PROJECT_MIRRORS_FILE.bak"
+
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
+
+            # 按行删除可能留下尾逗号，校验失败则回滚，避免后续解析异常
+            if python3 -c "import json,sys;json.load(open(sys.argv[1]))" "$PROJECT_MIRRORS_FILE" 2>/dev/null; then
+              rm -f "$PROJECT_MIRRORS_FILE.bak"
+            else
+              echo "::warning::projectsmirrors.json 处理后不是合法 JSON，已回滚"
+              mv -f "$PROJECT_MIRRORS_FILE.bak" "$PROJECT_MIRRORS_FILE"
+            fi
           fi
 
       - name: Check Scripts
         run: |
-          find ./ -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \; -exec chmod +x {} \;
+          find ./ -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \;
+          find ./ -maxdepth 3 -type f -name "*.sh" -exec chmod +x {} \;
 
       - name: Check Caches
         id: check-cache
         if: env.WRT_TEST != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
-          key: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_HASH}}
-          restore-keys: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}
+          key: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_HASH}}
+          restore-keys: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-
           path: |
             ./wrt/.ccache
             ./wrt/staging_dir/host*
@@ -140,7 +166,7 @@ jobs:
           fi
 
           if ${{steps.check-cache.outputs.cache-hit != 'true'}}; then
-            CACHE_LIST=$(gh cache list --key "$WRT_CONFIG-$WRT_INFO" | cut -f 1)
+            CACHE_LIST=$(gh cache list --key "$WRT_CONFIG-$WRT_INFO" --limit 100 2>/dev/null | cut -f 1 || true)
             for CACHE_KEY in $CACHE_LIST; do
               gh cache delete $CACHE_KEY
             done
@@ -187,22 +213,27 @@ jobs:
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
             echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
 
-            find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
+            find ./bin/targets/ -iregex ".*\(buildinfo\|json\|packages\)$" -exec rm -rf {} +
 
             for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_TARGET*") ; do
               EXT=$(basename $FILE | cut -d '.' -f 2-)
               NAME=$(basename $FILE | cut -d '.' -f 1 | grep -io "\($WRT_TARGET\).*")
+
+              # 名称为空说明该文件不符合命名规则，保持原名搬运，避免生成 "-xxx" 这类坏文件名
+              if [ -z "$NAME" ]; then
+                mv -f "$FILE" ./upload/$(basename "$FILE")
+                continue
+              fi
+
               NEW_FILE="$NAME"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_DATE"."$EXT"
-              mv -f $FILE ./upload/$NEW_FILE
+              mv -f "$FILE" "./upload/$NEW_FILE"
             done
 
             find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
-
-            make clean -j$(nproc)
           fi
 
       - name: Release Firmware
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}
           files: ./wrt/upload/*.*

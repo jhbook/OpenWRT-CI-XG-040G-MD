@@ -51,7 +51,9 @@ on:
         type: boolean
 
 #CI权限
-permissions: write-all
+permissions:
+  contents: write   # 发布 Release（WRT-CORE 内 action-gh-release）
+  actions: write    # 缓存管理（gh cache list / delete）
 
 #CI任务
 jobs:
