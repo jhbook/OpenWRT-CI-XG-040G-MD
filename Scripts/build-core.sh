@@ -38,6 +38,10 @@ auto_jobs() {
 }
 : "${WRT_JOBS:=$(auto_jobs)}"
 
+# 物理内存（GB）。rust host 包内部的 LLVM 并行度要按它限流，见 do_compile。
+WRT_MEM_GB=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null || echo 4)
+[ "$WRT_MEM_GB" -lt 1 ] && WRT_MEM_GB=1
+
 # ---- 编译参数默认值（本地编译不传参也能跑）----
 : "${WRT_CONFIG:=AIROHA-ONU}"
 : "${WRT_THEME:=argon}"
@@ -176,16 +180,24 @@ do_compile() {
 
 	cd "$WRT_DIR"
 
-	# rust 的 host 包在高并发下会随机构建失败：它内部还会再开一轮 LLVM 的
-	# ninja 并行（默认 -j8），和外层 make -jN 叠加后资源竞争导致构建中断。
-	# 这里先单独用 -j1 把它编好；成功后 staging_dir/hostpkg/stamp/.rust_installed
-	# 落盘，主构建不会再碰它，所以这一步不会重复编译、也不额外耗时。
-	# 已编过时该命令会直接秒过。
+	# rust 的 host 包内部还会再开一轮 LLVM 的 ninja 构建，它才是真正的资源大户：
+	# LLVM 里 AMDGPU 的几张 .inc 和几个 CXX 大文件，单个就能吃掉 2~3 GB 内存，
+	# 并行编译时峰值叠加，小内存机器会被内核直接 SIGKILL——日志里的表现是
+	# "FAILED: [code=137]" 紧跟一行 "Killed"（137 = 128 + 9），然后 rust 与
+	# 整个编译一起失败。所以这里做两件事：
+	#   1) 外层用 -j1，避免和其它软件包抢资源；
+	#   2) 按物理内存限制它内部 LLVM 的并行度（8 GB 机器只给 2 路）。
+	# 成功后 staging_dir/hostpkg/stamp/.rust_installed 落盘，主构建不会再碰它，
+	# 这一步不会重复编译；已编过时会直接秒过。
 	local rust_pkg="package/feeds/packages/rust"
 	if [ -d "$rust_pkg" ]; then
-		echo "==> 预编译 rust host 包（低并发，规避高并发构建失败）"
+		local rust_jobs=2
+		[ "$WRT_MEM_GB" -ge 16 ] && rust_jobs=4
+		[ "$WRT_MEM_GB" -ge 32 ] && rust_jobs=6
+		echo "==> 预编译 rust host 包（外层 -j1，内部 LLVM 并行 $rust_jobs，规避 OOM）"
 		echo "    日志：$WRT_DIR/rust-host-build.log"
-		if ! make "$rust_pkg/host/compile" -j1 V=s >"$WRT_DIR/rust-host-build.log" 2>&1; then
+		if ! CMAKE_BUILD_PARALLEL_LEVEL="$rust_jobs" NUM_JOBS="$rust_jobs" \
+			make "$rust_pkg/host/compile" -j1 V=s >"$WRT_DIR/rust-host-build.log" 2>&1; then
 			echo "!! rust host 包编译失败，日志尾部："
 			tail -40 "$WRT_DIR/rust-host-build.log"
 			exit 1
