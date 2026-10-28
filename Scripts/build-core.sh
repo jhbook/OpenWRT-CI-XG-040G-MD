@@ -191,6 +191,16 @@ do_compile() {
 	# 这一步不会重复编译；已编过时会直接秒过。
 	local rust_pkg="package/feeds/packages/rust"
 	if [ -d "$rust_pkg" ]; then
+		# rust 的 host 包虽然是 PKG_HOST_ONLY，但它内部的 bootstrap 会跑
+		# sanity check，要求目标平台的交叉编译器已经存在，否则直接 panic：
+		#   couldn't find required command: "aarch64-openwrt-linux-musl-gcc"
+		# 本地增量编译时这个编译器早就有了（前面几轮编过），所以看不出问题；
+		# 全新环境（CI 干净 workspace）必须先建 tools 与 toolchain。
+		# 两步都是幂等的，已建好时会快速通过。
+		echo "==> 预编译 tools 与 toolchain（rust host 包的 sanity check 需要交叉编译器）"
+		make -j"$WRT_JOBS" tools/install || make -j1 V=s tools/install
+		make -j"$WRT_JOBS" toolchain/install || make -j1 V=s toolchain/install
+
 		# 实测：AMDGPU 的 tblgen（AMDGPUGenGlobalISel.inc / AMDGPUGenAsmMatcher.inc）
 		# 是整条链上的内存黑洞，单个 llvm-tblgen 进程峰值就能吃掉 4~6 GB。
 		# 8 GB 机器即便只开 2 路也会在 [1750/3898] 附近被 SIGKILL（可用内存看着
