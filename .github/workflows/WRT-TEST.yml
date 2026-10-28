@@ -23,7 +23,9 @@ on:
           - ROCKCHIP
           - X86
           - TEST
-          - AIROHA-WIFI-NO
+          - AIROHA-MAIN
+          - AIROHA-ONU
+          - AIROHA-TCBOOT
       SOURCE:
         default: 'VIKINGYFY/immortalwrt'
         required: true
