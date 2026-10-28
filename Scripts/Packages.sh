@@ -102,6 +102,8 @@ UPDATE_PACKAGE "luci-app-airoha-npu" "rchen14b/luci-app-airoha-npu" "main"
 rm -rf ./luci-app-airoha-npu/luci-app-airoha-npu/
 #UPDATE_PACKAGE "luci-app-lucky" "sirpdboy/luci-app-lucky" "main"   # 已在 Config 中关闭，需要时取消注释
 #UPDATE_PACKAGE "luci-app-tailscale-community" "Tokisaki-Galaxy/luci-app-tailscale-community" "master" "" "luci-app-tailscale-community"   # 未在 Config 中启用，需要时取消注释
+# 上传并运行 .run/.sh/.ipk/.apk；.apk 走 apk 包管理器，与本固件（USE_APK=y）匹配；仓库根下即插件子目录，用 pkg 模式提取
+UPDATE_PACKAGE "luci-app-run" "wukongdaily/luci-app-run" "master" "pkg"
 
 #更新软件包版本
 UPDATE_VERSION() {
