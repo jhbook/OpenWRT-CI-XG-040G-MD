@@ -12,7 +12,7 @@
 #   WRT_THEME WRT_NAME WRT_SSID WRT_WORD WRT_IP WRT_PW WRT_PACKAGE
 #   WRT_TEST       true 时只生成配置，不下载不编译
 #   WRT_JOBS       并行任务数（默认按 CPU 与内存自动计算）
-#   WRT_SKIP_CLEAN true 时跳过 config 阶段的 make clean
+#   WRT_SKIP_CLEAN 默认 true：跳过 make clean，走增量编译；设 false 彻底干净重编
 
 set -euo pipefail
 
@@ -48,7 +48,12 @@ auto_jobs() {
 : "${WRT_PW:=无}"
 : "${WRT_PACKAGE:=}"
 : "${WRT_TEST:=false}"
-: "${WRT_SKIP_CLEAN:=false}"
+# 默认跳过 make clean（增量编译）：OpenWrt 的 make clean 会连
+# staging_dir/hostpkg/stamp/ 一起清掉，导致 rust host 包（内部还要构建一套
+# LLVM，耗时 1.5~2 小时）每次从头重编。跳过清理后复用已有产物，
+# 日常改配置 / 调插件只需 5~15 分钟。
+# 发版前要彻底干净重编时，显式设 WRT_SKIP_CLEAN=false（或 local-build.sh 加 --clean）。
+: "${WRT_SKIP_CLEAN:=true}"
 : "${WRT_MARK:=local}"
 : "${WRT_DATE:=$(TZ=UTC-8 date +'%y.%m.%d-%H.%M.%S')}"
 
@@ -143,9 +148,9 @@ do_config() {
 	make defconfig
 
 	if [ "$WRT_SKIP_CLEAN" = "true" ]; then
-		echo "==> 已跳过 make clean（WRT_SKIP_CLEAN=true）"
+		echo "==> 已跳过 make clean，复用已有构建产物（增量编译）"
 	else
-		echo "==> 执行 make clean（想复用上次编译产物可设 WRT_SKIP_CLEAN=true）"
+		echo "==> 执行 make clean（注意：会清掉 rust 标记，rust host 包将重编 1.5~2 小时）"
 		make clean
 	fi
 }

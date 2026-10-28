@@ -26,7 +26,7 @@ WRT_WORKSPACE="$(cd "$SCRIPT_DIR/.." && pwd)"
 : "${WRT_PW:=无}"
 : "${WRT_PACKAGE:=}"
 : "${WRT_TEST:=false}"
-: "${WRT_SKIP_CLEAN:=false}"
+: "${WRT_SKIP_CLEAN:=true}"
 : "${WRT_JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 SRC_DIR=""
@@ -34,6 +34,7 @@ MENUCONFIG="false"
 INSTALL_DEPS="false"
 SKIP_DEPS="false"
 FORCE_CLONE="false"
+UPDATE_SRC="false"
 PROXY_URL=""
 
 DEPS=(build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git \
@@ -56,6 +57,10 @@ usage() {
       --install-deps   自动安装缺失的编译依赖（需要 sudo）
       --skip-deps      跳过编译依赖检查（--test 只生成配置时可跳过）
       --force-clone    删除已有源码目录并重新 clone
+  --update         复用源码目录时先拉到该分支最新提交（默认直接复用不更新）
+  --clean          执行 make clean（默认跳过，走增量编译，快得多）
+                   注意 make clean 会清掉 staging_dir/hostpkg/stamp/，
+                   导致 rust host 包重编 1.5~2 小时，发版前才需要
       --proxy URL      GitHub 加速前缀，例如 https://ghfast.top/
                        （本次运行内所有 github 克隆都走加速，不修改 git 全局配置）
   -h, --help           显示帮助
@@ -77,6 +82,8 @@ while [ $# -gt 0 ]; do
 		--install-deps) INSTALL_DEPS="true"; shift ;;
 		--skip-deps)   SKIP_DEPS="true"; shift ;;
 		--force-clone) FORCE_CLONE="true"; shift ;;
+		--update)      UPDATE_SRC="true"; shift ;;
+		--clean)       WRT_SKIP_CLEAN="false"; shift ;;
 		--proxy)       PROXY_URL="${2:?缺少代理地址}"; shift 2 ;;
 		-h|--help)     usage; exit 0 ;;
 		*)             echo "未知参数: $1"; usage; exit 1 ;;
@@ -164,6 +171,14 @@ prepare_source() {
 
 	if [ -d "$SRC_DIR/.git" ]; then
 		echo "==> 复用已有源码目录: $SRC_DIR"
+		if [ "$UPDATE_SRC" = "true" ]; then
+			echo "==> 拉取最新源码: origin/$WRT_BRANCH"
+			if ! ( cd "$SRC_DIR" && git fetch --depth=1 origin "$WRT_BRANCH" && git reset --hard FETCH_HEAD ); then
+				echo "错误: 源码更新失败（可加 --force-clone 重新克隆）"
+				exit 1
+			fi
+			echo "==> 当前源码版本: $( cd "$SRC_DIR" && git log --oneline -1 )"
+		fi
 		return 0
 	fi
 
