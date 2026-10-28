@@ -130,4 +130,21 @@ if [ -f "$AIROHA_DTS" ]; then
 	sed -i 's/interrupts.*//g' "$AIROHA_DTS"
 fi
 
+#默认时区设为上海（上游 ImmortalWrt 基线是 UTC，且 default-settings-chn 默认不启用，故在此显式注入）
+UCI_DEFAULTS="./package/base-files/files/etc/uci-defaults"
+if [ -d "$UCI_DEFAULTS" ]; then
+	cat > "$UCI_DEFAULTS/99-set-timezone-cn" <<'TIMEZONE_EOF'
+#!/bin/sh
+uci -q batch <<-EOT
+	set system.@system[0].timezone='CST-8'
+	set system.@system[0].zonename='Asia/Shanghai'
+	commit system
+EOT
+exit 0
+TIMEZONE_EOF
+	chmod +x "$UCI_DEFAULTS/99-set-timezone-cn"
+else
+	echo "::warning::未找到 uci-defaults 目录，跳过默认时区设置"
+fi
+
 exit 0
