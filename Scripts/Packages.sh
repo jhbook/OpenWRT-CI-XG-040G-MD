@@ -77,9 +77,11 @@ UPDATE_PACKAGE "aurora-config" "eamonxg/luci-app-aurora-config" "master"
 #UPDATE_PACKAGE "qmodem" "FUjr/QModem" "main"   # 未在 Config 中启用，需要时取消注释并打开插件
 #UPDATE_PACKAGE "quickfile" "sbwml/luci-app-quickfile" "main"
 #UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
-UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "gecoosac luci-app-timewol luci-app-wolplus"
+UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "gecoosac luci-app-timewol luci-app-wolplus luci-app-wolultra"
 #UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
-UPDATE_PACKAGE "luci-app-airoha-npu" "bingoguo93/luci-app-airoha-npu" "main"
+UPDATE_PACKAGE "luci-app-airoha-npu" "rchen14b/luci-app-airoha-npu" "main"
+# 该仓库根目录即插件本体，内部同名子目录是旧版快照，删除避免出现重复包
+rm -rf ./luci-app-airoha-npu/luci-app-airoha-npu/
 #UPDATE_PACKAGE "luci-app-lucky" "sirpdboy/luci-app-lucky" "main"   # 已在 Config 中关闭，需要时取消注释
 #UPDATE_PACKAGE "luci-app-tailscale-community" "Tokisaki-Galaxy/luci-app-tailscale-community" "master" "" "luci-app-tailscale-community"   # 未在 Config 中启用，需要时取消注释
 
