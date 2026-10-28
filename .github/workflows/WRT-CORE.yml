@@ -91,6 +91,22 @@ jobs:
           sudo chown $USER:$USER /mnt/build_wrt
           sudo ln -s /mnt/build_wrt $GITHUB_WORKSPACE/wrt
 
+          # 增加 8G swap。rust 的 host 包构建 LLVM 时，单个 llvm-tblgen 进程
+          # 峰值就能吃 5~6 GB，而 runner 可用内存只有 7 GB 上下，没有 swap 时
+          # 会被内核直接 SIGKILL——严重时连脚本自身也被杀，连里面的
+          # "!! rust host 包编译失败" 都来不及打印。
+          # 本地 8 GB 虚拟机正是靠 8 GB swap 才编过（实测 swap 峰值约 1.5 GB）。
+          # swap 放 /mnt（runner 上空间较大的盘），不要放 /（只有约 14 GB）。
+          sudo fallocate -l 8G /mnt/swapfile \
+            || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=8192 status=none
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          echo "==> 内存与交换空间："
+          free -h
+          echo "==> 磁盘空间："
+          df -h /mnt
+
       - name: Initialization Values
         run: |
           echo "WRT_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
