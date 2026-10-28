@@ -191,7 +191,12 @@ do_compile() {
 	# 这一步不会重复编译；已编过时会直接秒过。
 	local rust_pkg="package/feeds/packages/rust"
 	if [ -d "$rust_pkg" ]; then
-		local rust_jobs=2
+		# 实测：AMDGPU 的 tblgen（AMDGPUGenGlobalISel.inc / AMDGPUGenAsmMatcher.inc）
+		# 是整条链上的内存黑洞，单个 llvm-tblgen 进程峰值就能吃掉 4~6 GB。
+		# 8 GB 机器即便只开 2 路也会在 [1750/3898] 附近被 SIGKILL（可用内存看着
+		# 还有 6 GB，但单进程瞬时峰值就超了）。所以 12 GB 以下一律单路。
+		local rust_jobs=1
+		[ "$WRT_MEM_GB" -ge 12 ] && rust_jobs=2
 		[ "$WRT_MEM_GB" -ge 16 ] && rust_jobs=4
 		[ "$WRT_MEM_GB" -ge 32 ] && rust_jobs=6
 		echo "==> 预编译 rust host 包（外层 -j1，内部 LLVM 并行 $rust_jobs，规避 OOM）"
