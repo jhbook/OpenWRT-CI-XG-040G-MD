@@ -170,6 +170,24 @@ do_compile() {
 	fi
 
 	cd "$WRT_DIR"
+
+	# rust 的 host 包在高并发下会随机构建失败：它内部还会再开一轮 LLVM 的
+	# ninja 并行（默认 -j8），和外层 make -jN 叠加后资源竞争导致构建中断。
+	# 这里先单独用 -j1 把它编好；成功后 staging_dir/hostpkg/stamp/.rust_installed
+	# 落盘，主构建不会再碰它，所以这一步不会重复编译、也不额外耗时。
+	# 已编过时该命令会直接秒过。
+	local rust_pkg="package/feeds/packages/rust"
+	if [ -d "$rust_pkg" ]; then
+		echo "==> 预编译 rust host 包（低并发，规避高并发构建失败）"
+		echo "    日志：$WRT_DIR/rust-host-build.log"
+		if ! make "$rust_pkg/host/compile" -j1 V=s >"$WRT_DIR/rust-host-build.log" 2>&1; then
+			echo "!! rust host 包编译失败，日志尾部："
+			tail -40 "$WRT_DIR/rust-host-build.log"
+			exit 1
+		fi
+		echo "==> rust host 包就绪"
+	fi
+
 	echo "==> 开始编译（并行 $WRT_JOBS）"
 	make -j"$WRT_JOBS" || make -j1 V=s
 }
