@@ -205,10 +205,12 @@ do_compile() {
 		# 是整条链上的内存黑洞，单个 llvm-tblgen 进程峰值就能吃掉 4~6 GB。
 		# 8 GB 机器即便只开 2 路也会在 [1750/3898] 附近被 SIGKILL（可用内存看着
 		# 还有 6 GB，但单进程瞬时峰值就超了）。所以 12 GB 以下一律单路。
+		# 12~31 GB 给 2 路：GitHub 标准 runner 名义 16 GB、实际可用约 13 GB，
+		# 开到 4 路叠加峰值约 20 GB 一样会被 SIGKILL，所以 16 GB 档不放 4 路。
+		# 32 GB 以上才给 4 路。
 		local rust_jobs=1
 		[ "$WRT_MEM_GB" -ge 12 ] && rust_jobs=2
-		[ "$WRT_MEM_GB" -ge 16 ] && rust_jobs=4
-		[ "$WRT_MEM_GB" -ge 32 ] && rust_jobs=6
+		[ "$WRT_MEM_GB" -ge 32 ] && rust_jobs=4
 		echo "==> 预编译 rust host 包（外层 -j1，内部 LLVM 并行 $rust_jobs，规避 OOM）"
 		echo "    日志：$WRT_DIR/rust-host-build.log"
 		if ! CMAKE_BUILD_PARALLEL_LEVEL="$rust_jobs" NUM_JOBS="$rust_jobs" \
