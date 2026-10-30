@@ -5,11 +5,11 @@ name: Auto-Clean
 
 #CI计划
 on:
-  #自动编译：当AIR-TCBOOT运行完成后
-  workflow_run:
-    workflows: ["AIR-TCBOOT"]
-    types:
-      - completed
+  # 自动清理已关闭（2026-10-30）：不再随 AIR-TCBOOT 自动触发，仅保留手动运行
+  # workflow_run:
+  #   workflows: ["AIR-TCBOOT"]
+  #   types:
+  #     - completed
   #手动清理
   workflow_dispatch:
 

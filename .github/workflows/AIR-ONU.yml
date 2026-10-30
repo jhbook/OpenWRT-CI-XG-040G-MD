@@ -6,9 +6,9 @@ name: AIR-ONU
 
 #CI计划
 on:
-  #自动编译：当Auto-Clean运行完成后
+  #自动编译：当AIR-TCBOOT运行完成后（Auto-Clean 的自动清理已关闭，改由 AIR-TCBOOT 直接触发，保持每月一次）
   workflow_run:
-    workflows: ["Auto-Clean"]
+    workflows: ["AIR-TCBOOT"]
     types:
       - completed
   #手动编译

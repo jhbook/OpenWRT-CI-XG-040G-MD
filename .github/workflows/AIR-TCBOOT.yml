@@ -5,7 +5,8 @@ name: AIR-TCBOOT
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # 每天3点 UTC
+    # 每月1日 3点 UTC（北京 11:00）编译一次（2026-10-30 由每天改为每月）
+    - cron: "0 3 1 * *"
   workflow_dispatch:
     inputs:
       PACKAGE:
