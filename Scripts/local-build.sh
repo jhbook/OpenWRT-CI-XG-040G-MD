@@ -27,7 +27,22 @@ WRT_WORKSPACE="$(cd "$SCRIPT_DIR/.." && pwd)"
 : "${WRT_PACKAGE:=}"
 : "${WRT_TEST:=false}"
 : "${WRT_SKIP_CLEAN:=true}"
-: "${WRT_JOBS:=$(nproc 2>/dev/null || echo 4)}"
+# 并行度：按 CPU 与内存共同决定（与 build-core.sh 的 auto_jobs 保持一致）。
+# 纯按 nproc 会在小内存机器上翻车——CPU 全开很容易把内存吃光，
+# 而 rust host 包编译时单个 llvm-tblgen 进程峰值就能吃 4~6 GB。
+# 想跑满 CPU 请显式 `-j N`。
+auto_jobs() {
+	local cpus mem_gb by_mem
+	cpus=$(nproc 2>/dev/null || echo 4)
+	mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null || echo 4)
+	[ "$mem_gb" -lt 1 ] && mem_gb=1
+
+	by_mem=$(( mem_gb * 2 / 3 ))
+	[ "$by_mem" -lt 1 ] && by_mem=1
+
+	if [ "$cpus" -lt "$by_mem" ]; then echo "$cpus"; else echo "$by_mem"; fi
+}
+: "${WRT_JOBS:=$(auto_jobs)}"
 
 SRC_DIR=""
 MENUCONFIG="false"

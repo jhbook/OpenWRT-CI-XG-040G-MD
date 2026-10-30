@@ -119,14 +119,27 @@ jobs:
           df -h /
 
           # swap：rust 的 host 包构建 LLVM 时单个 llvm-tblgen 峰值能吃 5~6 GB，
-          # 而 runner 可用内存只有 7~14 GB，没有 swap 会被内核直接 SIGKILL。
-          # 但不能盲建 8G——先看目标盘余量，避免把本就紧张的小盘写满。
+          # 没有 swap 时会被内核直接 SIGKILL。
+          # 目标大小按内存定：公开仓库 runner 是 4 核 16 GB，私有仓库只有 2 核 8 GB，
+          # 内存越小越依赖 swap，所以 32 GB 以下一律按 8G 准备。
+          MEM_GB=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null || echo 0)
+          [ "$MEM_GB" -lt 1 ] && MEM_GB=8
+
+          WANT_SWAP=8
+          [ "$MEM_GB" -ge 32 ] && WANT_SWAP=4
+
+          # 再受磁盘余量约束：给源码 / feeds / 编译产物留 15 GB，剩下的才拿来当 swap
+          MAX_SWAP=$((AVAIL_GB - 15))
+          [ "$MAX_SWAP" -lt 0 ] && MAX_SWAP=0
+
+          SWAP_SIZE=$WANT_SWAP
+          [ "$SWAP_SIZE" -gt "$MAX_SWAP" ] && SWAP_SIZE=$MAX_SWAP
+          [ "$SWAP_SIZE" -lt 2 ] && SWAP_SIZE=0
           SWAP_FILE="$BASE/swapfile"
-          SWAP_SIZE=0
-          if [ "$AVAIL_GB" -ge 40 ]; then
-            SWAP_SIZE=8
-          elif [ "$AVAIL_GB" -ge 20 ]; then
-            SWAP_SIZE=4
+
+          echo "==> 规格：$(nproc) 核 / ${MEM_GB}G 内存 / 编译盘 $BASE 可用 ${AVAIL_GB}G"
+          if [ "$AVAIL_GB" -lt 20 ]; then
+            echo "::warning::编译盘 $BASE 仅剩 ${AVAIL_GB}G，OpenWrt 完整编译通常要 25G 以上，可能中途失败"
           fi
 
           if [ "$SWAP_SIZE" -gt 0 ]; then
