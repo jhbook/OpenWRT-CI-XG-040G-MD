@@ -102,9 +102,8 @@ jobs:
             MNT_TARGET="/"
           fi
           BASE="${MNT_TARGET%/}"
-          AVAIL_GB=$(df -BG --output=avail "$BASE" | tail -1 | tr -dc '0-9')
-          AVAIL_GB=${AVAIL_GB:-0}
-          echo "==> 编译盘 $BASE 可用 ${AVAIL_GB}G"
+          echo "==> 编译盘 $BASE（删除镜像冗余前）："
+          df -h "$BASE"
 
           sudo mkdir -p "$BASE/build_wrt"
           sudo chown $USER:$USER "$BASE/build_wrt"
@@ -118,6 +117,11 @@ jobs:
           echo "==> 释放后根分区："
           df -h /
 
+          # 删完再测一次：这几个目录合计 20~30G，用删除前的数字算 swap 会过于保守
+          AVAIL_GB=$(df -BG --output=avail "$BASE" | tail -1 | tr -dc '0-9')
+          AVAIL_GB=${AVAIL_GB:-0}
+          echo "==> 编译盘 $BASE 实际可用 ${AVAIL_GB}G"
+
           # swap：rust 的 host 包构建 LLVM 时单个 llvm-tblgen 峰值能吃 5~6 GB，
           # 没有 swap 时会被内核直接 SIGKILL。
           # 目标大小按内存定：公开仓库 runner 是 4 核 16 GB，私有仓库只有 2 核 8 GB，
@@ -128,8 +132,9 @@ jobs:
           WANT_SWAP=8
           [ "$MEM_GB" -ge 32 ] && WANT_SWAP=4
 
-          # 再受磁盘余量约束：给源码 / feeds / 编译产物留 15 GB，剩下的才拿来当 swap
-          MAX_SWAP=$((AVAIL_GB - 15))
+          # 再受磁盘余量约束：完整编译（源码 + 工具链 + 产物）实测要 25G 以上，
+          # 先把它扣掉，剩下的才拿来当 swap
+          MAX_SWAP=$((AVAIL_GB - 25))
           [ "$MAX_SWAP" -lt 0 ] && MAX_SWAP=0
 
           SWAP_SIZE=$WANT_SWAP
