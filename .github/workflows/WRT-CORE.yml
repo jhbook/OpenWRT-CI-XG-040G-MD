@@ -108,9 +108,9 @@ jobs:
           echo "==> 编译盘 $BASE（删除镜像冗余前）："
           df -h "$BASE"
 
-          sudo mkdir -p "$BASE/build_wrt"
-          sudo chown $USER:$USER "$BASE/build_wrt"
-          sudo ln -s "$BASE/build_wrt" $GITHUB_WORKSPACE/wrt
+          sudo mkdir -p "${BASE%/}/build_wrt"
+          sudo chown $USER:$USER "${BASE%/}/build_wrt"
+          sudo ln -s "${BASE%/}/build_wrt" $GITHUB_WORKSPACE/wrt
 
           # 释放根分区空间：小规格 runner 的 / 只有约 14G，先把镜像里与编译无关的
           # 大目录删掉（社区通用做法），否则 runner 自己会因写不出日志而崩掉。
@@ -147,20 +147,27 @@ jobs:
           SWAP_SIZE=$WANT_SWAP
           if [ "$SWAP_SIZE" -gt "$MAX_SWAP" ]; then SWAP_SIZE=$MAX_SWAP; fi
           if [ "$SWAP_SIZE" -lt 2 ]; then SWAP_SIZE=0; fi
-          SWAP_FILE="$BASE/swapfile"
+          # GitHub runner 镜像自带 /swapfile 且通常已启用，同名创建会得到
+          # "fallocate failed: Text file busy"（AIR-ONU #34 就栽在这里），
+          # 因此换用独立文件名，并先打印现有 swap 便于诊断。
+          SWAP_FILE="${BASE%/}/swapfile-actions"
 
           echo "==> 规格：$(nproc) 核 / ${MEM_GB}G 内存 / 编译盘 $BASE 可用 ${AVAIL_GB}G"
           if [ "$AVAIL_GB" -lt 20 ]; then
             echo "::warning::编译盘 $BASE 仅剩 ${AVAIL_GB}G，OpenWrt 完整编译通常要 25G 以上，可能中途失败"
           fi
 
+          echo "==> 现有 swap："
+          swapon --show || true
+
           if [ "$SWAP_SIZE" -gt 0 ]; then
             echo "==> 在 $SWAP_FILE 创建 ${SWAP_SIZE}G swap"
+            sudo rm -f "$SWAP_FILE" 2>/dev/null || true
             sudo fallocate -l "${SWAP_SIZE}G" "$SWAP_FILE" \
               || sudo dd if=/dev/zero of="$SWAP_FILE" bs=1M count=$((SWAP_SIZE*1024)) status=none
             sudo chmod 600 "$SWAP_FILE"
-            sudo mkswap "$SWAP_FILE"
-            sudo swapon "$SWAP_FILE"
+            sudo mkswap "$SWAP_FILE" >/dev/null
+            sudo swapon "$SWAP_FILE" || echo "::warning::swap 挂载失败，将继续无 swap 编译"
           else
             echo "::warning::$BASE 可用空间仅 ${AVAIL_GB}G，跳过 swap（靠限流规避 OOM）"
           fi
