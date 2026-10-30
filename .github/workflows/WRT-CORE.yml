@@ -101,7 +101,10 @@ jobs:
             echo "==> /mnt 不是独立挂载点（与 / 同一文件系统），编译目录退回 /"
             MNT_TARGET="/"
           fi
+          # 注意：MNT_TARGET=/ 时 ${VAR%/} 会得到空字符串（AIR-ONU #33 就栽在
+          # df -h "" 上，报错即退出），必须兜回 /
           BASE="${MNT_TARGET%/}"
+          if [ -z "$BASE" ]; then BASE="/"; fi
           echo "==> 编译盘 $BASE（删除镜像冗余前）："
           df -h "$BASE"
 
@@ -112,7 +115,11 @@ jobs:
           # 释放根分区空间：小规格 runner 的 / 只有约 14G，先把镜像里与编译无关的
           # 大目录删掉（社区通用做法），否则 runner 自己会因写不出日志而崩掉。
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/share/swift /usr/local/.ghcup /opt/google/chrome \
+                      /usr/lib/firefox /usr/lib/firefox-esr /opt/microsoft \
+                      /usr/local/aws-cli 2>/dev/null || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
           sudo apt-get -yqq clean 2>/dev/null || true
           echo "==> 释放后根分区："
           df -h /
@@ -127,19 +134,19 @@ jobs:
           # 目标大小按内存定：公开仓库 runner 是 4 核 16 GB，私有仓库只有 2 核 8 GB，
           # 内存越小越依赖 swap，所以 32 GB 以下一律按 8G 准备。
           MEM_GB=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null || echo 0)
-          [ "$MEM_GB" -lt 1 ] && MEM_GB=8
+          if [ "$MEM_GB" -lt 1 ]; then MEM_GB=8; fi
 
           WANT_SWAP=8
-          [ "$MEM_GB" -ge 32 ] && WANT_SWAP=4
+          if [ "$MEM_GB" -ge 32 ]; then WANT_SWAP=4; fi
 
           # 再受磁盘余量约束：完整编译（源码 + 工具链 + 产物）实测要 25G 以上，
           # 先把它扣掉，剩下的才拿来当 swap
           MAX_SWAP=$((AVAIL_GB - 25))
-          [ "$MAX_SWAP" -lt 0 ] && MAX_SWAP=0
+          if [ "$MAX_SWAP" -lt 0 ]; then MAX_SWAP=0; fi
 
           SWAP_SIZE=$WANT_SWAP
-          [ "$SWAP_SIZE" -gt "$MAX_SWAP" ] && SWAP_SIZE=$MAX_SWAP
-          [ "$SWAP_SIZE" -lt 2 ] && SWAP_SIZE=0
+          if [ "$SWAP_SIZE" -gt "$MAX_SWAP" ]; then SWAP_SIZE=$MAX_SWAP; fi
+          if [ "$SWAP_SIZE" -lt 2 ]; then SWAP_SIZE=0; fi
           SWAP_FILE="$BASE/swapfile"
 
           echo "==> 规格：$(nproc) 核 / ${MEM_GB}G 内存 / 编译盘 $BASE 可用 ${AVAIL_GB}G"
