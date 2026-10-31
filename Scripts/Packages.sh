@@ -8,6 +8,9 @@ set -uo pipefail
 
 GITHUB_API="https://api.github.com"
 
+# 记录第三方包更新是否失败，供脚本末尾统一判定
+UPDATE_FAILED=0
+
 #安装和更新软件包
 UPDATE_PACKAGE() {
 	local PKG_NAME=$1
@@ -45,9 +48,21 @@ UPDATE_PACKAGE() {
 		fi
 	done
 
-	# 克隆 GitHub 仓库：失败直接返回非 0，避免"删掉了却没补回来"却仍然绿灯
+	# 克隆前清理同名残留：增量编译（复用源码目录）时上一次克隆的仓库还在，
+	# 会让 git clone 因「目标路径已存在且非空」直接失败
+	if [ -d "./$REPO_NAME/.git" ]; then
+		echo "==> 清理上次克隆的 $REPO_NAME 目录"
+		rm -rf "./$REPO_NAME"
+	elif [ -e "./$REPO_NAME" ]; then
+		echo "::error::./$REPO_NAME 已存在且不是 git 仓库，为避免误删未做清理"
+		UPDATE_FAILED=1
+		return 1
+	fi
+
+	# 克隆 GitHub 仓库：失败打标并返回非 0，避免"删掉了却没补回来"却仍然绿灯
 	if ! git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/$PKG_REPO.git"; then
 		echo "::error::克隆 $PKG_REPO ($PKG_BRANCH) 失败"
+		UPDATE_FAILED=1
 		return 1
 	fi
 
@@ -202,6 +217,12 @@ UPDATE_VERSION "sing-box"
 #引入私有扩展脚本
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then
 	source "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh"
+fi
+
+# 有第三方包更新失败时让流程明确失败，避免「少装了插件却一路绿灯」
+if [ "${UPDATE_FAILED:-0}" -ne 0 ]; then
+	echo "::error::存在第三方包更新失败，请查看上方日志"
+	exit 1
 fi
 
 exit 0
