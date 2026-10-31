@@ -53,8 +53,23 @@ UPDATE_PACKAGE() {
 
 	# 处理克隆的仓库
 	if [[ "$PKG_SPECIAL" == "pkg" ]]; then
-		find ./"$REPO_NAME"/*/ -maxdepth 3 -type d -name "$PKG_NAME" -prune -exec cp -rf {} ./ \;
-		rm -rf ./"$REPO_NAME"/
+		# 只在仓库「内部」找目标包目录（-mindepth 1 排除仓库根本身），
+		# 否则 find 第一个命中的就是外层仓库目录本身，等于没提取
+		local FOUND
+		FOUND=$(find ./"$REPO_NAME" -mindepth 1 -maxdepth 3 -type d -name "$PKG_NAME" -print -quit 2>/dev/null)
+
+		if [ -z "$FOUND" ]; then
+			# 找不到时不删仓库，交由构建系统自行识别，避免「删掉了却没补回来」
+			echo "::warning::pkg 模式下未在 $REPO_NAME 中找到 $PKG_NAME，保留整个仓库"
+		else
+			# 先把包目录移出，再删除外层仓库：
+			# 直接 cp 到 ./ 会因外层同名目录已存在而嵌套进去，紧接着的 rm 会把包一并删掉
+			local EXTRACT="./.${PKG_NAME}.extract.$$"
+			rm -rf "$EXTRACT"
+			mv -f "$FOUND" "$EXTRACT"
+			rm -rf ./"$REPO_NAME"/
+			mv -f "$EXTRACT" "./$PKG_NAME"
+		fi
 	elif [[ "$PKG_SPECIAL" == "name" ]]; then
 		mv -f "$REPO_NAME" "$PKG_NAME"
 	fi
